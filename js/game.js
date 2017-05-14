@@ -61,10 +61,10 @@ function create() {
     createWolf(game.width+100, game.rnd.integerInRange(0, game.height), -game.rnd.integerInRange(90, 100), redTeam);
   }*/
 
-  /*for (var i = 0; i < 30; i++) {
+  for (var i = 0; i < 30; i++) {
     createMammoth(-100, game.rnd.integerInRange(32, game.height-32), game.rnd.integerInRange(80, 100));
     createWolf(-200, game.rnd.integerInRange(32, game.height-32), game.rnd.integerInRange(90, 110), blueTeam);
-  }*/
+  }
 
   builder = createMan(400, 400, 80, blueTeam);
   toStateIdle(builder);
@@ -135,7 +135,7 @@ function updateGameState() {
     buildingToPlace.tint = 0xffffff;
     buildingToPlace.overlapping = false;
     buildingToPlace.box.tint = 0x75b453;
-    game.physics.arcade.overlap(buildingToPlace.box, props, function(building, prop) {
+    game.physics.arcade.overlap(buildingToPlace.box, world, function(building, entity) {
       buildingToPlace.overlapping = true;
       buildingToPlace.box.tint = 0xd66f6f;
     });
@@ -225,16 +225,8 @@ function toStateTree(entity) {
     entity.runEmitter.on = false;
     entity.animations.play('walk');
 
-    var minDist = Number.MAX_SAFE_INTEGER;
-    for (var i = 0; i < trees.length; i++) {
-      var dist = game.physics.arcade.distanceBetween(entity, trees[i]);
-      if (dist < minDist && !trees[i].cutter) {
-        minDist = dist;
-        if (entity.tree) { entity.tree.cutter = null; }
-        entity.tree = trees[i];
-        entity.tree.cutter = entity;
-      }
-    }
+    entity.tree = closestTree(entity);
+    entity.tree.cutter = entity;
 
     game.physics.arcade.moveToXY(entity, entity.tree.position.x-16, entity.tree.position.y+8, entity.speed);
 }
@@ -246,10 +238,26 @@ function toStateAxe(entity) {
   entity.animations.play('axe');
 
   entity.animations.currentAnim.onLoop.add(function() {
-    game.add.tween(entity.tree)
-      .to({ x: entity.tree.position.x-1 }, 50, Phaser.Easing.Linear.None)
-      .to({ x: entity.tree.position.x+1 }, 50, Phaser.Easing.Linear.None)
-      .to({ x: entity.tree.position.x }, 50, Phaser.Easing.Linear.None).start();
+
+    if (entity.tree.wood <= 0) {
+
+      var tween = game.add.tween(entity.tree)
+        .to({ alpha: 0 }, 100, Phaser.Easing.Linear.None).start();
+
+      tween.onComplete.add(function() { entity.tree.kill(); });
+
+      toStateTree(entity);
+
+    } else {
+
+      entity.tree.wood -= 1;
+      game.add.tween(entity.tree)
+        .to({ x: entity.tree.position.x-1 }, 50, Phaser.Easing.Linear.None)
+        .to({ x: entity.tree.position.x+1 }, 50, Phaser.Easing.Linear.None)
+        .to({ x: entity.tree.position.x }, 50, Phaser.Easing.Linear.None).start();
+
+    }
+
   });
 }
 
@@ -349,7 +357,6 @@ function stateTree(entity) {
 }
 
 function stateAxe(entity) {
-
 }
 
 function stateHoe(entity) {
@@ -358,6 +365,20 @@ function stateHoe(entity) {
 
 function stateBuild(entity) {
 
+}
+
+function closestTree(entity) {
+
+  var tree;
+  var minDist = Number.MAX_SAFE_INTEGER;
+  for (var i = 0; i < trees.length; i++) {
+    var dist = game.physics.arcade.distanceBetween(entity, trees[i]);
+    if (dist < minDist && !trees[i].cutter) {
+      minDist = dist;
+      tree = trees[i];
+    }
+  }
+  return tree;
 }
 //----------------------------------CREATION----------------------------------\\
 function createMan(x, y, speed, group) {
@@ -461,6 +482,7 @@ function randomTrees() {
     game.physics.arcade.enable(tree);
     tree.anchor.set(0.5);
     tree.frame = PROPS_TREE;
+    tree.wood = 10;
     trees.push(tree);
     props.push(tree);
   }
