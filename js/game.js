@@ -1,4 +1,4 @@
-var game = new Phaser.Game(800, 600, Phaser.AUTO, '', { preload: preload, create: create, update: update, render: render });
+var game = new Phaser.Game(800, 600, Phaser.AUTO, '', { preload: preload, create: create, update: update, render: render }, false, false);
 
 function preload() {
 
@@ -6,7 +6,8 @@ function preload() {
   game.load.spritesheet('wolf', 'assets/wolf.png', 32, 32);
   game.load.spritesheet('props', 'assets/props.png', 32, 32);
   game.load.spritesheet('mammoth', 'assets/mammoth.png', 64, 32);
-  game.load.spritesheet('house', 'assets/house.png', 32, 32);
+  game.load.spritesheet('farm', 'assets/farm.png', 32, 32);
+  game.load.spritesheet('cottage', 'assets/cottage.png', 32, 32);
   game.load.spritesheet('tools', 'assets/tools.png', 32, 32);
   game.load.image('smoke', 'assets/smoke.png');
   game.load.image('blood', 'assets/blood.png');
@@ -30,6 +31,7 @@ var bloodEmitter;
 var blueTeam = [];
 var redTeam = [];
 var trees = [];
+var props = [];
 var houses = [];
 var buildingMenu;
 var buildingToPlace = null;
@@ -70,14 +72,44 @@ function create() {
   // Place new building
   game.input.onDown.add(function() {
 
+    // Open menu
+    if (!buildingToPlace) {
+      buildingMenu.position.x = game.input.activePointer.x;
+      buildingMenu.position.y = game.input.activePointer.y;
+
+      game.add.tween(buildingMenu)
+        .to({ alpha: 1 }, 100, Phaser.Easing.Linear.None)
+        .start();
+    }
+
+    // Place building
     if (buildingToPlace && !buildingToPlace.overlapping) {
       buildingBlueprints.push(buildingToPlace);
-      createBuildingToPlace();
+      buildingToPlace = null;
 
       if (buildingBlueprints.length > 0 && builder.state != 'state_build') {
         toStateMove(builder, game.input.x-32, game.input.y, toStateBuild);
       }
     }
+  });
+
+  game.input.onUp.add(function(pointer)  {
+
+    if (!pointer.withinGame) {
+      return;
+    }
+
+    // Selected button
+    if (buildingMenu.hoe.scale.x === 2) {
+      createBuildingToPlace('farm');
+    } else if (buildingMenu.axe.scale.x === 2) {
+      createBuildingToPlace('cottage');
+    }
+
+    game.add.tween(buildingMenu)
+      .to({ alpha: 0 }, 100, Phaser.Easing.Linear.None)
+      .start();
+
   });
 }
 
@@ -89,7 +121,6 @@ function update() {
 }
 
 function render() {
-  //game.debug.body(buildingToPlace);
 }
 //------------------------------UPDATE GAME STATE------------------------------\\
 function updateGameState() {
@@ -103,26 +134,30 @@ function updateGameState() {
     // Check for collisions
     buildingToPlace.tint = 0xffffff;
     buildingToPlace.overlapping = false;
-    game.physics.arcade.overlap(buildingToPlace, world, function(building, entity) {
+    buildingToPlace.box.tint = 0x75b453;
+    game.physics.arcade.overlap(buildingToPlace.box, props, function(building, prop) {
       buildingToPlace.overlapping = true;
-      buildingToPlace.tint = 0xd66f6f;
+      buildingToPlace.box.tint = 0xd66f6f;
     });
 
   }
 
-  // Building menu
-  if (game.input.activePointer.isDown) {
+  // Handle building selection
+  if (!buildingMenu.closed) {
 
-    buildingMenu.position.x = game.input.activePointer.x;
-    buildingMenu.position.y = game.input.activePointer.y;
+    var dist = Phaser.Point.subtract(game.input.activePointer, buildingMenu.position);
 
-    game.add.tween(buildingMenu)
-      .to({ alpha: 1 }, 50, Phaser.Easing.Linear.None)
-      .start();
-  } else if (game.input.activePointer.isUp) {
-    game.add.tween(buildingMenu)
-      .to({ alpha: 0 }, 50, Phaser.Easing.Linear.None)
-      .start();
+    // Scale buttons
+    var hoeScale = Phaser.Math.clamp(-dist.x/10, 1, 2);
+    var spearScale = Phaser.Math.clamp(-dist.y/10, 1, 2);
+    var axeScale = Phaser.Math.clamp(dist.x/10, 1, 2);
+
+    hoeScale = Phaser.Math.max(hoeScale/spearScale, 1);
+    axeScale = Phaser.Math.max(axeScale/spearScale, 1);
+
+    buildingMenu.hoe.scale.set(hoeScale);
+    buildingMenu.spear.scale.set(spearScale);
+    buildingMenu.axe.scale.set(axeScale);
   }
 }
 //-------------------------------UPDATE ENTITIES-------------------------------\\
@@ -243,16 +278,19 @@ function toStateBuild(entity) {
   entity.body.velocity.set(0,0);
   var anim = entity.animations.play('axe');
 
-  buildingBlueprints.pop().kill();
+  var buildingBlueprint = buildingBlueprints.pop();
+  var buildingType = buildingBlueprint.buildingType;
 
-  // Add house
-  entity.house = game.add.sprite(entity.position.x + 32, entity.position.y, 'house');
-  houses.push(entity.house);
-  entity.house.z = -100;
-  entity.house.anchor.set(0.5);
+  // Add farm
+  entity.building = game.add.sprite(entity.position.x + 32, entity.position.y, buildingType);
+  houses.push(entity.building);
+  entity.building.z = -100;
+  entity.building.anchor.set(0.5);
+
+  buildingBlueprint.kill();
 
   anim.onLoop.add(function() {
-    if (entity.house.frame === 3) {
+    if (entity.building.frame === 3) {
 
       // Construct next buildings
       if (buildingBlueprints.length > 0) {
@@ -262,16 +300,28 @@ function toStateBuild(entity) {
         toStateIdle(entity);
       }
 
-      // Spawn 4 farmers
-      toStateMove(createMan(entity.house.position.x - 32, entity.position.y + 8, 100, blueTeam), entity.house.position.x - 40, entity.house.position.y + 32, toStateHoe);
-      toStateMove(createMan(entity.house.position.x, entity.position.y + 8, 100, blueTeam), entity.house.position.x - 40, entity.house.position.y + 64, toStateHoe);
-      toStateMove(createMan(entity.house.position.x + 32, entity.position.y + 8, 100, blueTeam), entity.house.position.x + 20, entity.house.position.y + 32, toStateHoe);
-      toStateMove(createMan(entity.house.position.x + 64, entity.position.y + 8, 100, blueTeam), entity.house.position.x + 20, entity.house.position.y + 64, toStateHoe);
+      if (buildingType === 'farm') {
+
+        // Spawn 4 farmers
+        toStateMove(createMan(entity.building.position.x - 32, entity.position.y + 8, 100, blueTeam), entity.building.position.x - 40, entity.building.position.y + 32, toStateHoe);
+        toStateMove(createMan(entity.building.position.x, entity.position.y + 8, 100, blueTeam), entity.building.position.x - 40, entity.building.position.y + 64, toStateHoe);
+        toStateMove(createMan(entity.building.position.x + 32, entity.position.y + 8, 100, blueTeam), entity.building.position.x + 20, entity.building.position.y + 32, toStateHoe);
+        toStateMove(createMan(entity.building.position.x + 64, entity.position.y + 8, 100, blueTeam), entity.building.position.x + 20, entity.building.position.y + 64, toStateHoe);
+
+      } else if (buildingType === 'cottage') {
+
+        // Spawn 4 wood cutters
+        toStateTree(createMan(entity.building.position.x - 32, entity.position.y + 8, 100, blueTeam));
+        toStateTree(createMan(entity.building.position.x, entity.position.y + 8, 100, blueTeam));
+        toStateTree(createMan(entity.building.position.x + 32, entity.position.y + 8, 100, blueTeam));
+        toStateTree(createMan(entity.building.position.x + 64, entity.position.y + 8, 100, blueTeam));
+
+      }
 
       anim.onLoop.dispose();
 
     } else {
-      entity.house.frame += 1;
+      entity.building.frame += 1;
     }
   });
 }
@@ -384,13 +434,24 @@ function createBloodEmitter() {
   bloodEmitter.gravity = 200;
 }
 
-function createBuildingToPlace() {
-  buildingToPlace = game.add.sprite(game.input.x, game.input.y, 'house');
-  game.physics.arcade.enable(buildingToPlace);
-  buildingToPlace.body.setSize(100, 110, -25-10, 0);
+function createBuildingToPlace(type) {
+  buildingToPlace = game.add.sprite(game.input.x, game.input.y, type);
+  buildingToPlace.buildingType = type;
   buildingToPlace.anchor.set(0.5);
   buildingToPlace.frame = 3;
   buildingToPlace.alpha = 0.5;
+
+  // Bounding box
+  var box = game.add.bitmapData(100, 110);
+  box.ctx.beginPath();
+  box.ctx.rect(0, 0, 100, 110);
+  box.ctx.fillStyle = '#fff';
+  box.ctx.globalAlpha = 0.5;
+  box.ctx.fill();
+  buildingToPlace.box = game.add.sprite(0, 40, box);
+  buildingToPlace.box.anchor.set(0.5);
+  game.physics.arcade.enable(buildingToPlace.box);
+  buildingToPlace.addChild(buildingToPlace.box);
 }
 
 function randomTrees() {
@@ -401,6 +462,7 @@ function randomTrees() {
     tree.anchor.set(0.5);
     tree.frame = PROPS_TREE;
     trees.push(tree);
+    props.push(tree);
   }
 }
 
@@ -411,6 +473,7 @@ function randomRocks() {
     game.physics.arcade.enable(rock);
     rock.anchor.set(0.5);
     rock.frame = game.rnd.integerInRange(PROPS_ROCK_1, PROPS_ROCK_3);
+    props.push(rock);
   }
 }
 
@@ -431,8 +494,13 @@ function createUI() {
   axe.frame = 2;
 
   buildingMenu.add(hoe);
+  buildingMenu.hoe = hoe;
+
   buildingMenu.add(spear);
+  buildingMenu.spear = spear;
+
   buildingMenu.add(axe);
+  buildingMenu.axe = axe;
 }
 //-------------------------------------SFX-------------------------------------\\
 function blood(x, y) {
